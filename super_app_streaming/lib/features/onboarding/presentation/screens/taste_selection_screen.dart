@@ -3,6 +3,8 @@ import 'package:go_router/go_router.dart';
 import 'package:super_app_streaming/core/app_theme.dart';
 import 'package:super_app_streaming/features/music/data/repositories/external_music_repository.dart'; 
 import 'package:super_app_streaming/features/music/domain/models/artist.dart';
+// Agregamos este import para que reconozca Playlist si es necesario
+import 'package:super_app_streaming/features/music/domain/models/track.dart'; 
 import 'dart:async';
 
 class TasteSelectionScreen extends StatefulWidget {
@@ -20,8 +22,8 @@ class _TasteSelectionScreenState extends State<TasteSelectionScreen> {
   final ScrollController _scrollController = ScrollController();
   List<Artist> _artists = [];
   bool _isLoading = true;
-  bool _isLoadingMore = false; // Para el spinner de abajo
-  int _currentOffset = 0; // Cuántos llevamos cargados (offset)
+  bool _isLoadingMore = false; 
+  int _currentOffset = 0; 
   
   Timer? _debounce;
   String _lastQuery = "";
@@ -31,11 +33,9 @@ class _TasteSelectionScreenState extends State<TasteSelectionScreen> {
     super.initState();
     _loadInitialArtists();
     
-    // Escuchar el scroll para paginación infinita
     _scrollController.addListener(() {
       if (_scrollController.position.pixels >= _scrollController.position.maxScrollExtent - 200 && 
           !_isLoadingMore && _lastQuery.isEmpty) {
-        // Solo cargamos más si no estamos buscando (la búsqueda simple no la paginamos en este ejemplo)
         _loadMoreArtists();
       }
     });
@@ -56,7 +56,6 @@ class _TasteSelectionScreenState extends State<TasteSelectionScreen> {
     }
   }
 
-  // Cargar siguiente página
   void _loadMoreArtists() async {
     setState(() => _isLoadingMore = true);
     
@@ -65,12 +64,11 @@ class _TasteSelectionScreenState extends State<TasteSelectionScreen> {
       
       if (mounted) {
         setState(() {
-          // Evitamos duplicados visuales
           final existingIds = _artists.map((e) => e.id).toSet();
           final uniqueNewArtists = newArtists.where((a) => !existingIds.contains(a.id)).toList();
           
           _artists.addAll(uniqueNewArtists);
-          _currentOffset += newArtists.length; // Avanzamos el offset
+          _currentOffset += newArtists.length; 
           _isLoadingMore = false;
         });
       }
@@ -87,12 +85,10 @@ class _TasteSelectionScreenState extends State<TasteSelectionScreen> {
       setState(() => _isLoading = true);
       
       if (query.isEmpty) {
-        // Si borra, recargar iniciales
         _loadInitialArtists();
         return;
       }
 
-      // Si busca, usamos la API de búsqueda
       final results = await _musicRepo.searchArtists(query);
       if (mounted) {
         setState(() {
@@ -161,7 +157,7 @@ class _TasteSelectionScreenState extends State<TasteSelectionScreen> {
                 : _artists.isEmpty 
                   ? const Center(child: Text("No se encontraron artistas"))
                   : GridView.builder(
-                      controller: _scrollController, // IMPORTANTE: Conectar el controlador
+                      controller: _scrollController,
                       padding: const EdgeInsets.all(16),
                       gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
                         crossAxisCount: 3,
@@ -169,10 +165,8 @@ class _TasteSelectionScreenState extends State<TasteSelectionScreen> {
                         crossAxisSpacing: 16,
                         mainAxisSpacing: 16,
                       ),
-                      // Añadimos 1 al item count si estamos cargando más para mostrar spinner abajo
                       itemCount: _artists.length + (_isLoadingMore ? 1 : 0),
                       itemBuilder: (context, index) {
-                        // Si es el último item y estamos cargando, mostramos spinner
                         if (index == _artists.length) {
                           return const Center(child: CircularProgressIndicator(strokeWidth: 2));
                         }
@@ -233,7 +227,16 @@ class _TasteSelectionScreenState extends State<TasteSelectionScreen> {
                 ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Mezclando tus favoritos... 🎧')));
                 try {
                   final playlist = await _musicRepo.getPersonalizedMix(_selectedArtistIds.toList());
-                  if (context.mounted) context.go('/home', extra: playlist); 
+                  
+                  if (context.mounted) {
+                    // --- CORRECCIÓN CRÍTICA AQUÍ ---
+                    // Antes enviabas solo 'playlist'.
+                    // Ahora enviamos un Mapa con 'playlist' Y 'artistIds'.
+                    context.go('/home', extra: {
+                      'playlist': playlist,
+                      'artistIds': _selectedArtistIds.toList(),
+                    }); 
+                  }
                 } catch (e) {
                   if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error: $e"), backgroundColor: Colors.red));
                 }

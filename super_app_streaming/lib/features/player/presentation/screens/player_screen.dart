@@ -7,7 +7,7 @@ import 'package:audio_video_progress_bar/audio_video_progress_bar.dart';
 import 'package:miniplayer/miniplayer.dart';
 import 'package:super_app_streaming/core/utils/logger_service.dart';
 import 'package:super_app_streaming/features/music/data/repositories/external_music_repository.dart';
-import 'package:super_app_streaming/main.dart'; // Para audioHandler
+import 'package:super_app_streaming/main.dart'; 
 
 class PlayerScreen extends StatefulWidget {
   final bool isEmbedded;
@@ -104,123 +104,143 @@ class _PlayerScreenState extends State<PlayerScreen> {
                 ),
               ),
 
-              // 2. CONTENIDO
+              // 2. CONTENIDO (ADAPTABLE E INTELIGENTE)
               SafeArea(
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 24),
-                  child: Column(
-                    children: [
-                      const Spacer(),
-                      
-                      // 3. CARÁTULA
-                      AspectRatio(
-                        aspectRatio: 1,
-                        child: Container(
-                          decoration: BoxDecoration(
-                            borderRadius: BorderRadius.circular(8),
-                            boxShadow: [BoxShadow(color: Colors.black45, blurRadius: 30, offset: const Offset(0, 20))],
-                          ),
-                          child: ClipRRect(
-                            borderRadius: BorderRadius.circular(8),
-                            child: CachedNetworkImage(
-                              imageUrl: artworkUrl,
-                              fit: BoxFit.cover,
+                child: LayoutBuilder(
+                  builder: (context, constraints) {
+                    return SingleChildScrollView(
+                      child: ConstrainedBox(
+                        // Esto fuerza a que el contenido tenga AL MENOS la altura de la pantalla
+                        constraints: BoxConstraints(
+                          minHeight: constraints.maxHeight,
+                        ),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 24),
+                          child: IntrinsicHeight(
+                            child: Column(
+                              children: [
+                                // Espacio flexible arriba (se encoge si falta espacio)
+                                const Spacer(), 
+                                
+                                // 3. CARÁTULA
+                                AspectRatio(
+                                  aspectRatio: 1,
+                                  child: Container(
+                                    decoration: BoxDecoration(
+                                      borderRadius: BorderRadius.circular(8),
+                                      boxShadow: [BoxShadow(color: Colors.black45, blurRadius: 30, offset: const Offset(0, 20))],
+                                    ),
+                                    child: ClipRRect(
+                                      borderRadius: BorderRadius.circular(8),
+                                      child: CachedNetworkImage(
+                                        imageUrl: artworkUrl,
+                                        fit: BoxFit.cover,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                
+                                const SizedBox(height: 40),
+                                
+                                // Textos
+                                Text(mediaItem.title, style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold), textAlign: TextAlign.center, maxLines: 1),
+                                const SizedBox(height: 6),
+                                Text(mediaItem.artist ?? '', style: const TextStyle(color: Colors.white70, fontSize: 16), maxLines: 1),
+                                
+                                const SizedBox(height: 24),
+
+                                // 4. BARRA DE PROGRESO
+                                StreamBuilder<PlaybackState>(
+                                  stream: audioHandler.playbackState,
+                                  builder: (context, stateSnap) {
+                                    final processingState = stateSnap.data?.processingState;
+                                    final isBuffering = processingState == AudioProcessingState.buffering ||
+                                                        processingState == AudioProcessingState.loading;
+
+                                    return StreamBuilder<Duration>(
+                                      stream: AudioService.position,
+                                      builder: (context, posSnap) {
+                                        final position = isBuffering ? Duration.zero : (posSnap.data ?? Duration.zero);
+                                        final total = isBuffering ? Duration.zero : (mediaItem.duration ?? Duration.zero);
+
+                                        return ProgressBar(
+                                          progress: position,
+                                          total: total,
+                                          onSeek: audioHandler.seek,
+                                          baseBarColor: Colors.white24,
+                                          progressBarColor: Colors.white,
+                                          thumbColor: Colors.white,
+                                          timeLabelLocation: TimeLabelLocation.sides,
+                                          timeLabelTextStyle: const TextStyle(color: Colors.white, fontSize: 12),
+                                        );
+                                      },
+                                    );
+                                  },
+                                ),
+
+                                const SizedBox(height: 20),
+
+                                // 5. CONTROLES
+                                Row(
+                                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                                  children: [
+                                    IconButton(
+                                      icon: const Icon(Icons.skip_previous, color: Colors.white, size: 42), 
+                                      onPressed: audioHandler.skipToPrevious
+                                    ),
+                                    
+                                    StreamBuilder<PlaybackState>(
+                                      stream: audioHandler.playbackState,
+                                      builder: (context, snapshot) {
+                                        final playing = snapshot.data?.playing ?? false;
+                                        final processingState = snapshot.data?.processingState;
+                                        final isLoading = processingState == AudioProcessingState.loading || 
+                                                          processingState == AudioProcessingState.buffering;
+
+                                        return Container(
+                                          width: 72, height: 72,
+                                          decoration: const BoxDecoration(shape: BoxShape.circle, color: Colors.white),
+                                          child: isLoading 
+                                            ? const Padding(
+                                                padding: EdgeInsets.all(20.0),
+                                                child: CircularProgressIndicator(color: Colors.black, strokeWidth: 3),
+                                              )
+                                            : IconButton(
+                                                icon: Icon(playing ? Icons.pause : Icons.play_arrow, color: Colors.black, size: 38),
+                                                onPressed: playing ? audioHandler.pause : audioHandler.play,
+                                              ),
+                                        );
+                                      },
+                                    ),
+                                    
+                                    IconButton(
+                                      icon: const Icon(Icons.skip_next, color: Colors.white, size: 42), 
+                                      onPressed: audioHandler.skipToNext
+                                    ),
+                                  ],
+                                ),
+                                
+                                const SizedBox(height: 20),
+                                
+                                // Botones inferiores
+                                Row(
+                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                  children: [
+                                    IconButton(icon: const Icon(Icons.lyrics_outlined, color: Colors.white), onPressed: _openLyrics),
+                                    IconButton(icon: const Icon(Icons.list, color: Colors.white), onPressed: () {}),
+                                  ],
+                                ),
+                                
+                                // Espacio flexible abajo (se encoge si falta espacio)
+                                const Spacer(),
+                                const SizedBox(height: 20), // Un margen mínimo de seguridad
+                              ],
                             ),
                           ),
                         ),
                       ),
-                      
-                      const SizedBox(height: 40),
-                      Text(mediaItem.title, style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold), textAlign: TextAlign.center, maxLines: 1),
-                      const SizedBox(height: 6),
-                      Text(mediaItem.artist ?? '', style: const TextStyle(color: Colors.white70, fontSize: 16), maxLines: 1),
-                      const SizedBox(height: 24),
-
-                      // 4. BARRA DE PROGRESO (Con lógica de 0:00)
-                      StreamBuilder<PlaybackState>(
-                        stream: audioHandler.playbackState,
-                        builder: (context, stateSnap) {
-                          final processingState = stateSnap.data?.processingState;
-                          final isBuffering = processingState == AudioProcessingState.buffering ||
-                                              processingState == AudioProcessingState.loading;
-
-                          return StreamBuilder<Duration>(
-                            stream: AudioService.position,
-                            builder: (context, posSnap) {
-                              // Si está cargando, forzamos 0:00 visualmente
-                              final position = isBuffering ? Duration.zero : (posSnap.data ?? Duration.zero);
-                              final total = isBuffering ? Duration.zero : (mediaItem.duration ?? Duration.zero);
-
-                              return ProgressBar(
-                                progress: position,
-                                total: total,
-                                onSeek: audioHandler.seek,
-                                baseBarColor: Colors.white24,
-                                progressBarColor: Colors.white,
-                                thumbColor: Colors.white,
-                                timeLabelLocation: TimeLabelLocation.sides,
-                                timeLabelTextStyle: const TextStyle(color: Colors.white, fontSize: 12),
-                              );
-                            },
-                          );
-                        },
-                      ),
-
-                      const SizedBox(height: 20),
-
-                      // 5. CONTROLES (Spinner en el botón Play)
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                        children: [
-                          IconButton(
-                            icon: const Icon(Icons.skip_previous, color: Colors.white, size: 42), 
-                            onPressed: audioHandler.skipToPrevious
-                          ),
-                          
-                          StreamBuilder<PlaybackState>(
-                            stream: audioHandler.playbackState,
-                            builder: (context, snapshot) {
-                              final playing = snapshot.data?.playing ?? false;
-                              final processingState = snapshot.data?.processingState;
-                              
-                              // Detectar si está cargando
-                              final isLoading = processingState == AudioProcessingState.loading || 
-                                                processingState == AudioProcessingState.buffering;
-
-                              return Container(
-                                width: 72, height: 72,
-                                decoration: const BoxDecoration(shape: BoxShape.circle, color: Colors.white),
-                                child: isLoading 
-                                  ? const Padding(
-                                      padding: EdgeInsets.all(20.0),
-                                      child: CircularProgressIndicator(color: Colors.black, strokeWidth: 3),
-                                    )
-                                  : IconButton(
-                                      icon: Icon(playing ? Icons.pause : Icons.play_arrow, color: Colors.black, size: 38),
-                                      onPressed: playing ? audioHandler.pause : audioHandler.play,
-                                    ),
-                              );
-                            },
-                          ),
-                          
-                          IconButton(
-                            icon: const Icon(Icons.skip_next, color: Colors.white, size: 42), 
-                            onPressed: audioHandler.skipToNext
-                          ),
-                        ],
-                      ),
-                      
-                      const SizedBox(height: 20),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          IconButton(icon: const Icon(Icons.lyrics_outlined, color: Colors.white), onPressed: _openLyrics),
-                          IconButton(icon: const Icon(Icons.list, color: Colors.white), onPressed: () {}),
-                        ],
-                      ),
-                      const SizedBox(height: 20),
-                    ],
-                  ),
+                    );
+                  },
                 ),
               ),
             ],

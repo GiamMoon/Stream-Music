@@ -7,11 +7,10 @@ class Track {
   final int durationMs;
   final String streamUrl;
   final String? canvasUrl;
-  final String? coverUrl; // NUEVO: URL de la carátula específica
+  final String? coverUrl;
   final bool hasLyrics;
   final bool isExplicit;
   
-  // Créditos
   final List<String> producers;
   final List<String> writers;
   final String label;
@@ -33,7 +32,6 @@ class Track {
     this.label = "Sello Independiente",
   });
 
-  // Constructor para tu Backend Go (Mantenemos compatibilidad)
   factory Track.fromJson(Map<String, dynamic> json) {
     return Track(
       id: json['id'] ?? '',
@@ -52,26 +50,56 @@ class Track {
     );
   }
 
-  // NUEVO: Constructor para API de Deezer
   factory Track.fromDeezer(Map<String, dynamic> json) {
     return Track(
       id: json['id'].toString(),
       title: json['title'] ?? 'Desconocido',
-      artistId: json['artist']['id'].toString(),
-      artistName: json['artist']['name'] ?? 'Artista',
-      albumId: json['album']['id'].toString(),
-      durationMs: (json['duration'] ?? 0) * 1000, // Deezer da segundos
-      streamUrl: json['preview'] ?? '', // Preview de 30s
-      coverUrl: json['album']['cover_xl'] ?? json['album']['cover_medium'],
-      canvasUrl: null, // Deezer no da video
-      hasLyrics: true, // Asumimos true para buscar en LRCLIB
+      
+      // SOLUCIÓN DEL ERROR: Verificamos si 'artist' existe antes de leer
+      artistId: json['artist'] != null ? json['artist']['id'].toString() : '0',
+      artistName: json['artist'] != null ? json['artist']['name'] : 'Artista',
+      
+      // SOLUCIÓN DEL ERROR: Verificamos si 'album' existe antes de leer
+      // En la lista de canciones de un álbum, esto suele venir nulo.
+      albumId: json['album'] != null ? json['album']['id'].toString() : '0',
+      
+      durationMs: (json['duration'] ?? 0) * 1000,
+      streamUrl: json['preview'] ?? '',
+      
+      // Verificamos si hay carátula
+      coverUrl: json['album'] != null 
+          ? (json['album']['cover_xl'] ?? json['album']['cover_medium']) 
+          : null,
+          
+      canvasUrl: null,
+      hasLyrics: true,
       isExplicit: json['explicit_lyrics'] ?? false,
       label: "Deezer Content",
     );
   }
+
+  // Helper para asignarle la foto del álbum manualmente
+  // (Porque la API no la manda en la lista de canciones del álbum)
+  Track copyWithCover(String newCoverUrl) {
+    return Track(
+      id: id,
+      title: title,
+      artistId: artistId,
+      artistName: artistName,
+      albumId: albumId,
+      durationMs: durationMs,
+      streamUrl: streamUrl,
+      canvasUrl: canvasUrl,
+      coverUrl: newCoverUrl, // <--- Aquí cambiamos la foto
+      hasLyrics: hasLyrics,
+      isExplicit: isExplicit,
+      producers: producers,
+      writers: writers,
+      label: label,
+    );
+  }
 }
 
-// --- CLASE PLAYLIST ---
 class Playlist {
   final String id;
   final String name;

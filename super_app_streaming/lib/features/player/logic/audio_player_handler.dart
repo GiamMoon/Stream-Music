@@ -6,21 +6,18 @@ import 'package:super_app_streaming/features/music/domain/models/track.dart';
 
 class AudioPlayerHandler extends BaseAudioHandler with SeekHandler {
   final _player = AudioPlayer();
-  final _audioResolver = AudioResolver(); // Instancia para buscar links de audio
+  final _audioResolver = AudioResolver();
   int _currentIndex = 0;
+  
+  // NUEVA VARIABLE: Para saber si estamos en el "limbo" buscando el link
+  bool _isResolving = false; 
 
   AudioPlayerHandler() {
-    // 1. Escuchar eventos del player
-    _player.playbackEventStream.listen((event) {
-      _broadcastState(event);
-    });
+    // 1. Escuchar eventos
+    _player.playbackEventStream.listen(_broadcastState);
+    _player.playerStateStream.listen((state) => _broadcastState(_player.playbackEvent));
 
-    // 2. Escuchar cambios de estado (Play/Pause/Buffering)
-    _player.playerStateStream.listen((state) {
-      _broadcastState(_player.playbackEvent);
-    });
-
-    // 3. Auto-avance al terminar canción
+    // 2. Auto-avance
     _player.processingStateStream.listen((state) {
       if (state == ProcessingState.completed) {
         skipToNext();
@@ -28,16 +25,13 @@ class AudioPlayerHandler extends BaseAudioHandler with SeekHandler {
     });
   }
 
-  // --- NUEVA FUNCIÓN PRINCIPAL ---
-  // Esta función recibe Tracks normales, actualiza la UI al instante y luego resuelve el audio.
   Future<void> playFromPlaylist(List<Track> tracks, int index) async {
     _currentIndex = index;
 
-    // 1. Convertimos la lista de Tracks a MediaItems con toda la info VISUAL (Metadata)
-    // Dejamos el ID temporal 'resolving' para saber que aún no tiene audio real.
+    // Creamos los items visuales
     final queueItems = tracks.map((track) {
       return MediaItem(
-        id: 'resolving_${track.id}', // ID temporal
+        id: 'resolving_${track.id}',
         title: track.title,
         artist: track.artistName,
         artUri: track.coverUrl != null ? Uri.parse(track.coverUrl!) : null,
@@ -50,56 +44,55 @@ class AudioPlayerHandler extends BaseAudioHandler with SeekHandler {
       );
     }).toList();
 
-    // 2. Actualizamos la cola y el ítem actual INMEDIATAMENTE.
-    // Esto hace que el MiniPlayer o el PlayerScreen muestren la canción al instante.
     queue.add(queueItems);
     mediaItem.add(queueItems[index]);
 
-    // 3. Iniciamos el proceso de buscar el audio real y reproducir.
     await _playCurrentIndex();
   }
 
-  // Lógica interna para resolver URL y tocar
   Future<void> _playCurrentIndex() async {
-    // Obtenemos el item actual de la cola (que tiene metadata pero quizás no URL de audio)
-    final currentItem = queue.value[_currentIndex];
-
-    // Notificamos estado 'loading' pero la UI ya tiene foto y título
-    playbackState.add(playbackState.value.copyWith(
-      processingState: AudioProcessingState.loading,
-    ));
+    // 1. DETENER LO QUE SUENA INMEDIATAMENTE
+    // Esto silencia la canción anterior al instante.
+    await _player.stop(); 
+    
+    // 2. ACTIVAR MODO CARGA
+    // Levantamos la bandera y forzamos una actualización de estado.
+    // Esto hará que la UI muestre el spinner y ponga el tiempo en 0:00.
+    _isResolving = true;
+    _broadcastState(_player.playbackEvent); 
 
     try {
-      // 1. Buscamos el link de audio real en segundo plano
+      final currentItem = queue.value[_currentIndex];
       final artist = currentItem.extras?['artist_name'] ?? "";
       final title = currentItem.title;
 
       logger.i("🔍 Resolviendo audio para: $title - $artist");
       
-      // Llamamos a tu AudioResolver
+      // Buscamos el link (esto tarda unos segundos)
       final streamUrl = await _audioResolver.getFullAudioUrl(artist, title);
 
+      // 3. DESACTIVAR MODO CARGA
+      // Ya tenemos el link, así que volvemos a la normalidad.
+      _isResolving = false;
+
       if (streamUrl.isNotEmpty) {
-        // 2. Creamos un nuevo MediaItem que SÍ tiene la URL en el ID
         final resolvedItem = currentItem.copyWith(id: streamUrl);
-        
-        // 3. Actualizamos para que el sistema sepa que ya hay audio
         mediaItem.add(resolvedItem); 
 
-        // 4. Cargamos y reproducimos
+        // Cargar y Reproducir
         await _player.setAudioSource(AudioSource.uri(Uri.parse(streamUrl)));
         _player.play();
       } else {
         logger.e("❌ No se encontró URL para: $title");
-        // Opcional: saltar a la siguiente si falla
-        // skipToNext(); 
+        // Si falló, actualizamos para quitar el spinner
+        _broadcastState(_player.playbackEvent);
       }
     } catch (e) {
+      _isResolving = false;
       logger.e("Error reproduciendo: $e");
+      _broadcastState(_player.playbackEvent);
     }
   }
-
-  // --- CONTROLES ESTÁNDAR ---
 
   @override
   Future<void> play() => _player.play();
@@ -114,29 +107,39 @@ class AudioPlayerHandler extends BaseAudioHandler with SeekHandler {
   Future<void> skipToNext() async {
     if (_currentIndex + 1 < queue.value.length) {
       _currentIndex++;
-      // Usamos la lógica interna para resolver la siguiente
       await _playCurrentIndex();
     }
   }
 
   @override
   Future<void> skipToPrevious() async {
-    // Si ya pasaron 3 segundos, reiniciamos la canción actual
     if (_player.position.inSeconds > 3) {
       seek(Duration.zero);
       return;
     }
-    // Si no, vamos a la anterior
     if (_currentIndex > 0) {
       _currentIndex--;
       await _playCurrentIndex();
     }
   }
 
-  // Función auxiliar para emitir el estado a la UI
+  // --- EMISIÓN DE ESTADO INTELIGENTE ---
   void _broadcastState(PlaybackEvent event) {
     final playing = _player.playing;
     final processingState = _player.processingState;
+
+    // TRUCO: Si la bandera _isResolving está activa, MENTIMOS a la UI
+    // diciéndole que estamos "cargando" (loading), sin importar lo que diga el player real.
+    // Esto asegura que se vea el Spinner y el tiempo 0:00.
+    final effectiveProcessingState = _isResolving 
+        ? AudioProcessingState.loading 
+        : const {
+            ProcessingState.idle: AudioProcessingState.idle,
+            ProcessingState.loading: AudioProcessingState.loading,
+            ProcessingState.buffering: AudioProcessingState.buffering,
+            ProcessingState.ready: AudioProcessingState.ready,
+            ProcessingState.completed: AudioProcessingState.completed,
+          }[processingState]!;
 
     playbackState.add(playbackState.value.copyWith(
       controls: [
@@ -146,15 +149,10 @@ class AudioPlayerHandler extends BaseAudioHandler with SeekHandler {
       ],
       systemActions: const {MediaAction.seek},
       androidCompactActionIndices: const [0, 1, 2],
-      processingState: const {
-        ProcessingState.idle: AudioProcessingState.idle,
-        ProcessingState.loading: AudioProcessingState.loading,
-        ProcessingState.buffering: AudioProcessingState.buffering,
-        ProcessingState.ready: AudioProcessingState.ready,
-        ProcessingState.completed: AudioProcessingState.completed,
-      }[processingState]!,
+      processingState: effectiveProcessingState,
       playing: playing,
-      updatePosition: _player.position,
+      // Si estamos resolviendo, forzamos la posición a 0:00
+      updatePosition: _isResolving ? Duration.zero : _player.position, 
       bufferedPosition: _player.bufferedPosition,
       speed: _player.speed,
       queueIndex: _currentIndex,
