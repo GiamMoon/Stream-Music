@@ -1,16 +1,17 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:miniplayer/miniplayer.dart';
 import 'package:super_app_streaming/features/music/domain/models/track.dart';
+import 'package:super_app_streaming/main.dart'; // Para audioHandler y miniplayerController
+import 'package:super_app_streaming/features/player/logic/audio_player_handler.dart';
 
 class HomeScreen extends StatelessWidget {
-  // Recibimos la playlist como parámetro opcional
   final Playlist? initialPlaylist;
 
   const HomeScreen({super.key, this.initialPlaylist});
 
   @override
   Widget build(BuildContext context) {
-    // Si tenemos playlist, sacamos la primera canción para mostrarla en el "Hero"
     final firstTrack = initialPlaylist?.tracks.firstOrNull;
 
     return Scaffold(
@@ -31,7 +32,7 @@ class HomeScreen extends StatelessWidget {
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             if (firstTrack != null) ...[
-              // Carátula (Usamos la URL real si existe, o un color si no)
+              // Carátula
               Container(
                 width: 200,
                 height: 200,
@@ -77,15 +78,18 @@ class HomeScreen extends StatelessWidget {
               
               ElevatedButton.icon(
                 icon: const Icon(Icons.play_circle_fill),
-                label: const Text("IR AL REPRODUCTOR"),
+                label: const Text("REPRODUCIR"),
                 onPressed: () {
-                  // CORRECCIÓN CRÍTICA AQUÍ:
-                  // Enviamos un MAPA, no un Track suelto.
                   if (initialPlaylist != null && initialPlaylist!.tracks.isNotEmpty) {
-                    context.push('/player', extra: {
-                      'playlist': initialPlaylist!.tracks, // Lista completa
-                      'index': 0, // Empezamos por la primera canción
-                    });
+                    
+                    final handler = audioHandler as AudioPlayerHandler;
+                    
+                    // 1. Iniciar reproducción
+                    handler.playFromPlaylist(initialPlaylist!.tracks, 0);
+                    
+                    // 2. Expandir el Miniplayer automáticamente
+                    // SOLUCIÓN: Usamos el controlador global directamente
+                    miniplayerController.animateToHeight(state: PanelState.MAX);
                   }
                 },
               )

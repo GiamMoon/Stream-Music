@@ -1,9 +1,12 @@
 import 'package:audio_service/audio_service.dart';
 import 'package:just_audio/just_audio.dart';
+import 'package:super_app_streaming/core/utils/audio_resolver.dart';
 import 'package:super_app_streaming/core/utils/logger_service.dart';
+import 'package:super_app_streaming/features/music/domain/models/track.dart';
 
 class AudioPlayerHandler extends BaseAudioHandler with SeekHandler {
   final _player = AudioPlayer();
+  final _audioResolver = AudioResolver(); // Instancia para buscar links de audio
   int _currentIndex = 0;
 
   AudioPlayerHandler() {
@@ -17,7 +20,7 @@ class AudioPlayerHandler extends BaseAudioHandler with SeekHandler {
       _broadcastState(_player.playbackEvent);
     });
 
-    // 3. Auto-avance
+    // 3. Auto-avance al terminar canción
     _player.processingStateStream.listen((state) {
       if (state == ProcessingState.completed) {
         skipToNext();
@@ -25,34 +28,78 @@ class AudioPlayerHandler extends BaseAudioHandler with SeekHandler {
     });
   }
 
-  // Carga inicial
-  Future<void> loadPlaylist(List<MediaItem> items, int initialIndex) async {
-    _currentIndex = initialIndex;
-    queue.add(items);
-    mediaItem.add(items[initialIndex]);
+  // --- NUEVA FUNCIÓN PRINCIPAL ---
+  // Esta función recibe Tracks normales, actualiza la UI al instante y luego resuelve el audio.
+  Future<void> playFromPlaylist(List<Track> tracks, int index) async {
+    _currentIndex = index;
 
-    final currentUrl = items[initialIndex].id;
-    if (currentUrl.isNotEmpty) {
-       await playResolvedUrl(currentUrl);
-    }
+    // 1. Convertimos la lista de Tracks a MediaItems con toda la info VISUAL (Metadata)
+    // Dejamos el ID temporal 'resolving' para saber que aún no tiene audio real.
+    final queueItems = tracks.map((track) {
+      return MediaItem(
+        id: 'resolving_${track.id}', // ID temporal
+        title: track.title,
+        artist: track.artistName,
+        artUri: track.coverUrl != null ? Uri.parse(track.coverUrl!) : null,
+        duration: Duration(milliseconds: track.durationMs),
+        extras: {
+          'original_id': track.id,
+          'artist_name': track.artistName,
+          'track_title': track.title,
+        },
+      );
+    }).toList();
+
+    // 2. Actualizamos la cola y el ítem actual INMEDIATAMENTE.
+    // Esto hace que el MiniPlayer o el PlayerScreen muestren la canción al instante.
+    queue.add(queueItems);
+    mediaItem.add(queueItems[index]);
+
+    // 3. Iniciamos el proceso de buscar el audio real y reproducir.
+    await _playCurrentIndex();
   }
 
-  // Reproducir URL resuelta
-  Future<void> playResolvedUrl(String url) async {
+  // Lógica interna para resolver URL y tocar
+  Future<void> _playCurrentIndex() async {
+    // Obtenemos el item actual de la cola (que tiene metadata pero quizás no URL de audio)
+    final currentItem = queue.value[_currentIndex];
+
+    // Notificamos estado 'loading' pero la UI ya tiene foto y título
+    playbackState.add(playbackState.value.copyWith(
+      processingState: AudioProcessingState.loading,
+    ));
+
     try {
-      // Forzar estado de carga VISUAL antes de procesar
-      playbackState.add(playbackState.value.copyWith(
-        processingState: AudioProcessingState.buffering,
-      ));
+      // 1. Buscamos el link de audio real en segundo plano
+      final artist = currentItem.extras?['artist_name'] ?? "";
+      final title = currentItem.title;
 
-      // Configurar audio
-      final source = AudioSource.uri(Uri.parse(url));
-      await _player.setAudioSource(source);
-      _player.play();
+      logger.i("🔍 Resolviendo audio para: $title - $artist");
+      
+      // Llamamos a tu AudioResolver
+      final streamUrl = await _audioResolver.getFullAudioUrl(artist, title);
+
+      if (streamUrl.isNotEmpty) {
+        // 2. Creamos un nuevo MediaItem que SÍ tiene la URL en el ID
+        final resolvedItem = currentItem.copyWith(id: streamUrl);
+        
+        // 3. Actualizamos para que el sistema sepa que ya hay audio
+        mediaItem.add(resolvedItem); 
+
+        // 4. Cargamos y reproducimos
+        await _player.setAudioSource(AudioSource.uri(Uri.parse(streamUrl)));
+        _player.play();
+      } else {
+        logger.e("❌ No se encontró URL para: $title");
+        // Opcional: saltar a la siguiente si falla
+        // skipToNext(); 
+      }
     } catch (e) {
-      logger.e("Error en just_audio: $e");
+      logger.e("Error reproduciendo: $e");
     }
   }
+
+  // --- CONTROLES ESTÁNDAR ---
 
   @override
   Future<void> play() => _player.play();
@@ -65,42 +112,28 @@ class AudioPlayerHandler extends BaseAudioHandler with SeekHandler {
 
   @override
   Future<void> skipToNext() async {
-    final q = queue.value;
-    if (_currentIndex + 1 < q.length) {
+    if (_currentIndex + 1 < queue.value.length) {
       _currentIndex++;
-      _notifySkip(q[_currentIndex]);
+      // Usamos la lógica interna para resolver la siguiente
+      await _playCurrentIndex();
     }
   }
 
   @override
   Future<void> skipToPrevious() async {
+    // Si ya pasaron 3 segundos, reiniciamos la canción actual
     if (_player.position.inSeconds > 3) {
       seek(Duration.zero);
       return;
     }
-    final q = queue.value;
+    // Si no, vamos a la anterior
     if (_currentIndex > 0) {
       _currentIndex--;
-      _notifySkip(q[_currentIndex]);
+      await _playCurrentIndex();
     }
   }
 
-  // Helper para notificar a la UI que cambiamos de canción y debe mostrar carga
-  void _notifySkip(MediaItem newItem) {
-    // 1. Detener audio actual
-    _player.stop(); 
-    
-    // 2. Actualizar metadata (Título, foto)
-    mediaItem.add(newItem);
-
-    // 3. FORZAR estado de Buffering para que salga el círculo de carga
-    playbackState.add(playbackState.value.copyWith(
-      processingState: AudioProcessingState.buffering,
-      playing: true, 
-      queueIndex: _currentIndex,
-    ));
-  }
-
+  // Función auxiliar para emitir el estado a la UI
   void _broadcastState(PlaybackEvent event) {
     final playing = _player.playing;
     final processingState = _player.processingState;

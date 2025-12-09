@@ -1,16 +1,18 @@
-import 'package:audio_service/audio_service.dart'; // Importar
+import 'package:audio_service/audio_service.dart';
 import 'package:flutter/material.dart';
+import 'package:miniplayer/miniplayer.dart'; // <--- IMPORTANTE
 import 'package:super_app_streaming/core/app_theme.dart';
 import 'package:super_app_streaming/core/router/app_router.dart';
-import 'package:super_app_streaming/features/player/logic/audio_player_handler.dart'; // Importar tu handler
+import 'package:super_app_streaming/features/player/logic/audio_player_handler.dart';
 
-// Variable global para acceder al reproductor desde cualquier lado
+// Variables globales
 late AudioHandler audioHandler;
+final MiniplayerController miniplayerController = MiniplayerController(); // <--- NUEVA VARIABLE GLOBAL
 
 Future<void> main() async {
-  WidgetsFlutterBinding.ensureInitialized(); // Necesario para inicializar servicios antes de UI
+  WidgetsFlutterBinding.ensureInitialized();
 
-  // INICIALIZACIÓN DEL SERVICIO DE AUDIO (BACKGROUND)
+  // INICIALIZACIÓN DEL SERVICIO DE AUDIO
   audioHandler = await AudioService.init(
     builder: () => AudioPlayerHandler(),
     config: const AudioServiceConfig(
