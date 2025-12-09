@@ -1,0 +1,3 @@
+-- Agregamos columnas para el manejo de reset password
+ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_token TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_token_expiry TIMESTAMP;
